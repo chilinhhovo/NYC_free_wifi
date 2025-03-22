@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NYC WiFi Hotspots Map</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }
+        #map {
+            width: 100%;
+            height: 100vh;
+        }
+        .search-container {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            z-index: 1000;
+            background: white;
+            box-shadow: none;
+            width: 300px;
+            border: 2px solid #000;
+        }
+        .search-input {
+            width: 100%;
+            font-size: 16px;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            box-sizing: border-box;
+        }
+        .search-results {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #000;
+            border-radius: 4px;
+            margin-top: 5px;
+            max-height: 300px;
+            overflow-y: auto;
+            box-shadow: none;
+        }
+        .search-result-item {
+            padding: 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+        .search-result-item:hover {
+            background: #f4f4f4;
+        }
+        .neighborhood-name {
+            font-weight: 500;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }
+        .hotspot-count {
+            font-size: 12px;
+            color: #666;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }
+        /* Style for reset button */
+        .reset-button {
+            background: white;
+            border: 1px solid #000;
+            border-radius: 4px;
+            width: 30px;
+            height: 30px;
+            line-height: 30px;
+            text-align: center;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 18px;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }
+        .reset-button:hover {
+            background: #f4f4f4;
+        }
+        /* Style for credit line */
+        .credit {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            box-shadow: none;
+            font-size: 12px;
+            z-index: 1000;
+            border: 1px solid #000;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }
+        .credit a {
+            color: #333;
+            text-decoration: none;
+        }
+        .credit a:hover {
+            text-decoration: underline;
+        }
+        /* Mobile responsive styles */
+        @media screen and (max-width: 768px) {
+            .search-container {
+                width: calc(100% - 20px);
+                max-width: 300px;
+                padding: 8px;
+            }
+            .search-input {
+                font-size: 14px;
+                padding: 8px;
+            }
+            .search-results {
+                max-height: 200px;
+            }
+            .search-result-item {
+                padding: 8px;
+                font-size: 14px;
+            }
+            .neighborhood-name {
+                font-size: 14px;
+            }
+            .hotspot-count {
+                font-size: 12px;
+            }
+            /* Adjust zoom controls and reset button for mobile */
+            .leaflet-control-zoom {
+                transform: scale(0.9);
+            }
+            .reset-button {
+                width: 28px;
+                height: 28px;
+                line-height: 28px;
+                font-size: 16px;
+            }
+        }
+        /* Additional mobile optimizations for very small screens */
+        @media screen and (max-width: 480px) {
+            .search-container {
+                top: 5px;
+                left: 5px;
+                padding: 5px;
+            }
+            .search-input {
+                font-size: 13px;
+                padding: 6px;
+            }
+            .search-result-item {
+                padding: 6px;
+                font-size: 13px;
+            }
+            .neighborhood-name {
+                font-size: 13px;
+            }
+            .hotspot-count {
+                font-size: 11px;
+            }
+            /* Make controls even smaller on very small screens */
+            .leaflet-control-zoom {
+                transform: scale(0.8);
+            }
+            .reset-button {
+                width: 26px;
+                height: 26px;
+                line-height: 26px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="search-container">
+        <input type="text" id="search-input" placeholder="Search for a neighborhood...">
+        <div id="search-results"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // Initialize the map
+        var map = L.map('map', {
+            zoomControl: false  // Disable default zoom control
+        }).setView([40.7128, -74.0060], 12);
+
+        // Add zoom control to bottom right
+        L.control.zoom({
+            position: 'bottomright'
+        }).addTo(map);
+
+        // Add reset button
+        var resetControl = L.Control.extend({
+            options: {
+                position: 'bottomright'
+            },
+            onAdd: function(map) {
+                var container = L.DomUtil.create('div', 'reset-button');
+                container.innerHTML = '⟲';
+                container.title = 'Reset to full city view';
+                
+                container.onclick = function() {
+                    // Reset the map view to show all markers
+                    if (markers.length > 0) {
+                        const allBounds = L.latLngBounds(markers.map(m => m.getLatLng()));
+                        map.fitBounds(allBounds, { padding: [50, 50] });
+                    } else {
+                        // Default NYC view if no markers
+                        map.setView([40.7128, -74.0060], 12);
+                    }
+                    // Show all markers
+                    filterMarkersByNeighborhood(null);
+                    // Clear search
+                    searchInput.value = '';
+                    searchResults.style.display = 'none';
+                };
+                
+                return container;
+            }
+        });
+        map.addControl(new resetControl());
+
+        // Add credit line
+        const credit = L.DomUtil.create('div', 'credit');
+        credit.innerHTML = 'By <a href="https://chilinhhovo.github.io/portfolio/" target="_blank">Chi Vo</a><br>Data: <a href="https://data.cityofnewyork.us/City-Government/NYC-Wi-Fi-Hotspot-Locations/yjub-udmw/about_data" target="_blank">NYC Open Data</a>';
+        document.getElementById('map').appendChild(credit);
+
+        // Add the tile layer for the map with a clean, minimalist style
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20
+        }).addTo(map);
+
+        // Initialize markers array and neighborhoods object
+        var markers = [];
+        var neighborhoods = {};
+        var searchInput = document.getElementById('search-input');
+        var searchResults = document.getElementById('search-results');
+
+        // Function to create marker popup content
+        function createPopupContent(hotspot) {
+            return `
+                <div class="info-window">
+                    <h3>${hotspot.Name || 'Unnamed Location'}</h3>
+                    <p><strong>Provider:</strong> ${hotspot.Provider}</p>
+                    <p><strong>Type:</strong> ${hotspot.Type}</p>
+                    <p><strong>Location:</strong> ${hotspot.Location || 'N/A'}</p>
+                    <p><strong>SSID:</strong> ${hotspot.SSID || 'N/A'}</p>
+                    ${hotspot.Remarks ? `<p><strong>Remarks:</strong> ${hotspot.Remarks}</p>` : ''}
+                </div>
+            `;
+        }
+
+        // Function to add markers to the map
+        function addMarkers(hotspots) {
+            console.log('Adding markers for', hotspots.length, 'hotspots');
+            
+            // Clear existing markers
+            markers.forEach(marker => marker.remove());
+            markers = [];
+            neighborhoods = {};
+
+            // Add new markers
+            hotspots.forEach(hotspot => {
+                if (hotspot.Latitude && hotspot.Longitude) {
+                    console.log('Creating marker for:', hotspot.Name, 'at', hotspot.Latitude, hotspot.Longitude);
+                    var marker = L.circleMarker([parseFloat(hotspot.Latitude), parseFloat(hotspot.Longitude)], {
+                        radius: 5,
+                        fillColor: '#00ffff', // Neon blue color
+                        color: 'black',
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.8
+                    }).bindPopup(createPopupContent(hotspot))
+                      .addTo(map);
+                    
+                    // Store marker data
+                    marker.hotspot = hotspot;
+                    markers.push(marker);
+
+                    // Organize markers by neighborhood
+                    const nta = hotspot['Neighborhood Tabulation Area (NTA)'];
+                    if (nta) {
+                        if (!neighborhoods[nta]) {
+                            neighborhoods[nta] = [];
+                        }
+                        neighborhoods[nta].push(marker);
+                    }
+                } else {
+                    console.log('Skipping hotspot without coordinates:', hotspot.Name);
+                }
+            });
+
+            console.log('Total markers added:', markers.length);
+            console.log('Total neighborhoods:', Object.keys(neighborhoods).length);
+        }
+
+        // Function to show/hide markers based on neighborhood
+        function filterMarkersByNeighborhood(neighborhood) {
+            console.log('Filtering markers for neighborhood:', neighborhood);
+            markers.forEach(marker => {
+                if (neighborhood === null || marker.hotspot['Neighborhood Tabulation Area (NTA)'] === neighborhood) {
+                    marker.addTo(map);
+                } else {
+                    marker.remove();
+                }
+            });
+        }
+
+        // Function to search neighborhoods
+        function searchNeighborhoods(query) {
+            query = query.toLowerCase();
+            const results = Object.keys(neighborhoods).filter(nta => 
+                nta.toLowerCase().includes(query)
+            );
+
+            if (results.length > 0) {
+                searchResults.innerHTML = results.map(nta => 
+                    `<div class="search-result-item">
+                        <div class="neighborhood-name">${nta}</div>
+                        <div>${neighborhoods[nta].length} hotspots</div>
+                    </div>`
+                ).join('');
+                searchResults.style.display = 'block';
+            } else {
+                searchResults.style.display = 'none';
+            }
+        }
+
+        // Add event listener for search input
+        searchInput.addEventListener('input', function(e) {
+            searchNeighborhoods(e.target.value);
+        });
+
+        // Handle search result selection
+        searchResults.addEventListener('click', function(e) {
+            // Find the closest parent search-result-item
+            const resultItem = e.target.closest('.search-result-item');
+            if (resultItem) {
+                const neighborhoodName = resultItem.querySelector('.neighborhood-name').textContent;
+                filterMarkersByNeighborhood(neighborhoodName);
+                searchInput.value = neighborhoodName;
+                searchResults.style.display = 'none';
+
+                // Center map on the selected neighborhood's markers
+                const neighborhoodMarkers = neighborhoods[neighborhoodName];
+                if (neighborhoodMarkers.length > 0) {
+                    const bounds = L.latLngBounds(neighborhoodMarkers.map(m => m.getLatLng()));
+                    map.fitBounds(bounds, { padding: [50, 50] });
+                }
+            }
+        });
+
+        // Close search results when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+                searchResults.style.display = 'none';
+            }
+        });
+
+        // Load and process the CSV data
+        console.log('Starting to load CSV file...');
+        fetch('nyc_wifi_hotspots.csv')
+            .then(response => {
+                console.log('Response status:', response.status);
+                console.log('Response headers:', [...response.headers.entries()]);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                console.log('CSV file loaded successfully');
+                return response.text();
+            })
+            .then(csv => {
+                console.log('CSV data first 100 characters:', csv.substring(0, 100));
+                console.log('Processing CSV data...');
+                // Split into lines and remove empty lines
+                const lines = csv.split('\n').filter(line => line.trim());
+                console.log('Total lines in CSV:', lines.length);
+                
+                if (lines.length === 0) {
+                    throw new Error('CSV file is empty');
+                }
+                
+                const headers = lines[0].split(',').map(h => h.trim());
+                console.log('CSV headers:', headers);
+                
+                const hotspots = [];
+                let skippedLines = 0;
+                
+                // Process each line
+                for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i];
+                    const values = line.split(',');
+                    
+                    // Skip malformed lines
+                    if (values.length !== headers.length) {
+                        console.warn(`Skipping malformed line ${i + 1}: values count (${values.length}) doesn't match headers count (${headers.length})`);
+                        skippedLines++;
+                        continue;
+                    }
+                    
+                    const hotspot = {};
+                    headers.forEach((header, index) => {
+                        hotspot[header] = values[index].trim().replace(/^"|"$/g, ''); // Remove quotes
+                    });
+                    
+                    // Validate coordinates
+                    const lat = parseFloat(hotspot.Latitude);
+                    const lng = parseFloat(hotspot.Longitude);
+                    if (!isNaN(lat) && !isNaN(lng)) {
+                        hotspots.push(hotspot);
+                    } else {
+                        console.warn(`Skipping hotspot with invalid coordinates: ${hotspot.Name}`);
+                        skippedLines++;
+                    }
+                }
+
+                console.log('Processed valid hotspots:', hotspots.length);
+                console.log('Skipped lines:', skippedLines);
+                
+                if (hotspots.length === 0) {
+                    throw new Error('No valid hotspots found in CSV');
+                }
+                
+                // Add markers to the map
+                addMarkers(hotspots);
+                
+                // If no markers were added, log an error
+                if (markers.length === 0) {
+                    console.error('No markers were added to the map. Check the console for parsing errors.');
+                }
+            })
+            .catch(error => {
+                console.error('Error loading or processing CSV:', error);
+                // Display error on the map
+                const errorDiv = document.createElement('div');
+                errorDiv.style.position = 'absolute';
+                errorDiv.style.top = '50%';
+                errorDiv.style.left = '50%';
+                errorDiv.style.transform = 'translate(-50%, -50%)';
+                errorDiv.style.backgroundColor = 'white';
+                errorDiv.style.padding = '20px';
+                errorDiv.style.borderRadius = '5px';
+                errorDiv.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
+                errorDiv.innerHTML = `Error loading data: ${error.message}`;
+                document.getElementById('map').appendChild(errorDiv);
+            });
+    </script>
+</body>
+</html> 
